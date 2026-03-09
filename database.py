@@ -27,6 +27,13 @@ def init_db():
     import auth
     if not auth.get_user(db, "teacher@edupulse.com"):
         auth.create_user(db, "Admin Teacher", "teacher@edupulse.com", "teacher123", "teacher")
+        
+    # Pre-create 10 sample student accounts
+    for i in range(1, 11):
+        email = f"student{i}@edupulse.com"
+        if not auth.get_user(db, email):
+            auth.create_user(db, f"Student {i}", email, f"student{i}", "student")
+            
     db.close()
 
 def get_db_session():

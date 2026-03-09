@@ -30,7 +30,7 @@ st.markdown(f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 * {{ font-family:'Inter',sans-serif; box-sizing:border-box; }}
-.stApp {{ background:#08091e; color:#e2e8f0; }}
+.stApp {{ background: #000000; color: #ededed; }}
 #MainMenu,footer {{ visibility:hidden; }}
 
 /* ─── NATIVE BUTTON OVERRIDE (all stButton) ─── */
@@ -370,11 +370,12 @@ auth.init_auth_session()
 
 for k,v in [("student_submitted",False),("student_data",{}),
             ("extra_students",[]),("teacher_page","Dashboard"),
-            ("student_page","Dashboard")]:
+            ("student_page","Dashboard"),("login_mode", None)]:
     if k not in st.session_state: st.session_state[k]=v
 
 def go_home():
     auth.logout_user()
+    st.session_state["login_mode"] = None
     st.session_state["student_submitted"]=False
     st.session_state["student_data"]={}
 
@@ -496,37 +497,77 @@ if not st.session_state.get("logged_in", False):
     </div>
     """, unsafe_allow_html=True)
 
-    # ── Role cards ──
-    gap1, center_col, gap2 = st.columns([1, 2, 1])
+    # ── Role selection & Login forms ──
+    if st.session_state.get("login_mode") is None:
+        gap1, col_t, spacer, col_s, gap2 = st.columns([0.5, 2.5, 0.4, 2.5, 0.5])
+        
+        with col_t:
+            st.markdown("""
+            <div class="lp-card lp-card-teacher">
+              <div style="font-size:3rem;margin-bottom:14px">🏫📊</div>
+              <div class="lp-card-title">TEACHER / ADMIN</div>
+            </div>
+            <div style="height:12px"></div>""", unsafe_allow_html=True)
+            st.markdown('<div class="lp-btn-teacher">', unsafe_allow_html=True)
+            if st.button("Login as Teacher  →", key="btn_t", use_container_width=True):
+                st.session_state["login_mode"] = "teacher"
+                st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
 
-    with center_col:
-        st.markdown('<div class="lp-card lp-card-teacher" style="padding: 20px 40px;">', unsafe_allow_html=True)
-        tab1, tab2 = st.tabs(["Login", "Register"])
-        with tab1:
-            l_email = st.text_input("Email", key="l_email")
-            l_pass  = st.text_input("Password", type="password", key="l_pass")
+        with col_s:
+            st.markdown("""
+            <div class="lp-card lp-card-student">
+              <div style="font-size:3rem;margin-bottom:14px">🎓💻</div>
+              <div class="lp-card-title">STUDENT</div>
+            </div>
+            <div style="height:12px"></div>""", unsafe_allow_html=True)
+            st.markdown('<div class="lp-btn-student">', unsafe_allow_html=True)
+            if st.button("Login as Student  →", key="btn_s", use_container_width=True):
+                st.session_state["login_mode"] = "student"
+                st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+
+    elif st.session_state["login_mode"] == "teacher":
+        gap1, center_col, gap2 = st.columns([1, 2, 1])
+        with center_col:
+            st.markdown('<div class="lp-card lp-card-teacher" style="padding: 20px 40px;">', unsafe_allow_html=True)
+            st.markdown('<div style="font-size:1.5rem;font-weight:700;margin-bottom:20px;text-align:center">Teacher Login</div>', unsafe_allow_html=True)
+            l_email = st.text_input("Email", key="t_email")
+            l_pass  = st.text_input("Password", type="password", key="t_pass")
             if st.button("Login", use_container_width=True, type="primary"):
-                success, msg = auth.login_user(l_email, l_pass)
+                success, msg = auth.login_user(l_email, l_pass, expected_role="teacher")
                 if success:
                     st.success(msg)
                     st.rerun()
                 else:
                     st.error(msg)
-        with tab2:
-            r_name  = st.text_input("Full Name", key="r_name")
-            r_email = st.text_input("Email", key="r_email")
-            r_pass  = st.text_input("Password", type="password", key="r_pass")
-            if st.button("Register", use_container_width=True, type="primary"):
-                db = SessionLocal()
-                existing = auth.get_user(db, r_email)
-                if existing:
-                    st.error("Email already registered.")
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("← Back to Role Selection", key="t_back", use_container_width=True):
+                st.session_state["login_mode"] = None
+                st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+
+    elif st.session_state["login_mode"] == "student":
+        gap1, center_col, gap2 = st.columns([1, 2, 1])
+        with center_col:
+            st.markdown('<div class="lp-card lp-card-student" style="padding: 20px 40px;">', unsafe_allow_html=True)
+            st.markdown('<div style="font-size:1.5rem;font-weight:700;margin-bottom:20px;text-align:center">Student Portal</div>', unsafe_allow_html=True)
+            l_email = st.text_input("Email", key="s_email")
+            l_pass  = st.text_input("Password", type="password", key="s_pass")
+            if st.button("Login", use_container_width=True, type="primary"):
+                success, msg = auth.login_user(l_email, l_pass, expected_role="student")
+                if success:
+                    st.success(msg)
+                    st.rerun()
                 else:
-                    user = auth.create_user(db, r_name, r_email, r_pass, "student")
-                    st.success("Registration successful! Please login.")
-                    gamification.check_and_award_badge(db, user.id, "first_login")
-                db.close()
-        st.markdown('</div>', unsafe_allow_html=True)
+                    st.error(msg)
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("← Back to Role Selection", key="s_back_nav", use_container_width=True):
+                st.session_state["login_mode"] = None
+                st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown("""
     <div style='text-align:center;color:rgba(255,255,255,0.12);font-size:0.72rem;padding:36px 20px 18px'>
@@ -568,7 +609,7 @@ if st.session_state.get("user_role") == "teacher":
           <div style="font-size:0.72rem;color:#334155;margin-top:8px;letter-spacing:0.5px">AI Academic Advisor</div>
         </div>""", unsafe_allow_html=True)
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-        if st.button("🔄 Switch Role", use_container_width=True, key="t_back"):
+        if st.button("🚪 Logout", use_container_width=True, key="t_back"):
             go_home(); st.rerun()
 
     page = st.session_state["teacher_page"]
@@ -1060,7 +1101,7 @@ elif st.session_state.get("user_role") == "student":
           <div style="font-size:0.72rem;color:#334155;margin-top:8px;letter-spacing:0.5px">AI Academic Advisor</div>
         </div>""", unsafe_allow_html=True)
         st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
-        if st.button("🔄 Switch Role", use_container_width=True, key="s_back"):
+        if st.button("🚪 Logout", use_container_width=True, key="s_back"):
             go_home(); st.rerun()
 
     sname = st.session_state.get("user_name", "Student")
