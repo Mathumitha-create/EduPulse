@@ -6,6 +6,14 @@ import numpy as np
 import io
 import base64
 
+from database import init_db, SessionLocal
+import auth
+import task_manager
+import gamification
+from models import User
+
+init_db()
+
 st.set_page_config(page_title="EduPulse AI", page_icon="🎓", layout="wide",
                    initial_sidebar_state="expanded")
 
@@ -23,7 +31,7 @@ st.markdown(f"""
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 * {{ font-family:'Inter',sans-serif; box-sizing:border-box; }}
 .stApp {{ background:#08091e; color:#e2e8f0; }}
-#MainMenu,footer,header {{ visibility:hidden; }}
+#MainMenu,footer {{ visibility:hidden; }}
 
 /* ─── NATIVE BUTTON OVERRIDE (all stButton) ─── */
 .stButton > button {{
@@ -358,19 +366,22 @@ def load_data():
 # ─────────────────────────────────────────────
 # SESSION STATE
 # ─────────────────────────────────────────────
-for k,v in [("role",None),("student_submitted",False),("student_data",{}),
-            ("extra_students",[]),("teacher_page","Dashboard")]:
+auth.init_auth_session()
+
+for k,v in [("student_submitted",False),("student_data",{}),
+            ("extra_students",[]),("teacher_page","Dashboard"),
+            ("student_page","Dashboard")]:
     if k not in st.session_state: st.session_state[k]=v
 
 def go_home():
-    st.session_state["role"]=None
+    auth.logout_user()
     st.session_state["student_submitted"]=False
     st.session_state["student_data"]={}
 
 # ═══════════════════════════════════════════════════
 # LANDING PAGE
 # ═══════════════════════════════════════════════════
-if not st.session_state["role"]:
+if not st.session_state.get("logged_in", False):
     st.markdown(f"""
     <style>
     .stApp {{
@@ -486,30 +497,35 @@ if not st.session_state["role"]:
     """, unsafe_allow_html=True)
 
     # ── Role cards ──
-    gap1, col_t, spacer, col_s, gap2 = st.columns([0.3, 2.8, 0.2, 2.8, 0.3])
+    gap1, center_col, gap2 = st.columns([1, 2, 1])
 
-    with col_t:
-        st.markdown("""
-        <div class="lp-card lp-card-teacher">
-          <div style="font-size:3rem;margin-bottom:14px">🏫📊</div>
-          <div class="lp-card-title">Teacher / Admin</div>
-        </div>
-        <div style="height:12px"></div>""", unsafe_allow_html=True)
-        st.markdown('<div class="lp-btn-teacher">', unsafe_allow_html=True)
-        if st.button("Login as Teacher  →", key="btn_t", use_container_width=True):
-            st.session_state["role"] = "teacher"; st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    with col_s:
-        st.markdown("""
-        <div class="lp-card lp-card-student">
-          <div style="font-size:3rem;margin-bottom:14px">🎓💻</div>
-          <div class="lp-card-title">Student</div>
-        </div>
-        <div style="height:12px"></div>""", unsafe_allow_html=True)
-        st.markdown('<div class="lp-btn-student">', unsafe_allow_html=True)
-        if st.button("Login as Student  →", key="btn_s", use_container_width=True):
-            st.session_state["role"] = "student"; st.rerun()
+    with center_col:
+        st.markdown('<div class="lp-card lp-card-teacher" style="padding: 20px 40px;">', unsafe_allow_html=True)
+        tab1, tab2 = st.tabs(["Login", "Register"])
+        with tab1:
+            l_email = st.text_input("Email", key="l_email")
+            l_pass  = st.text_input("Password", type="password", key="l_pass")
+            if st.button("Login", use_container_width=True, type="primary"):
+                success, msg = auth.login_user(l_email, l_pass)
+                if success:
+                    st.success(msg)
+                    st.rerun()
+                else:
+                    st.error(msg)
+        with tab2:
+            r_name  = st.text_input("Full Name", key="r_name")
+            r_email = st.text_input("Email", key="r_email")
+            r_pass  = st.text_input("Password", type="password", key="r_pass")
+            if st.button("Register", use_container_width=True, type="primary"):
+                db = SessionLocal()
+                existing = auth.get_user(db, r_email)
+                if existing:
+                    st.error("Email already registered.")
+                else:
+                    user = auth.create_user(db, r_name, r_email, r_pass, "student")
+                    st.success("Registration successful! Please login.")
+                    gamification.check_and_award_badge(db, user.id, "first_login")
+                db.close()
         st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown("""
@@ -521,7 +537,7 @@ if not st.session_state["role"]:
 # ═══════════════════════════════════════════════════
 # TEACHER DASHBOARD
 # ═══════════════════════════════════════════════════
-if st.session_state["role"] == "teacher":
+if st.session_state.get("user_role") == "teacher":
     df = load_data()
     if st.session_state["extra_students"]:
         df = pd.concat([df, pd.DataFrame(st.session_state["extra_students"])], ignore_index=True)
@@ -566,7 +582,7 @@ if st.session_state["role"] == "teacher":
       </div>
       <div class="top-bar-right">
         <span style="font-size:1.25rem;color:#64748b;cursor:pointer" title="Notifications">🔔</span>
-        <span style="font-size:0.88rem;color:#94a3b8;margin-left:4px">Admin</span>
+        <span style="font-size:0.88rem;color:#94a3b8;margin-left:4px">{st.session_state.user_name}</span>
         <span style="background:linear-gradient(135deg,#1e3a5f,#2d4a7a);border-radius:50%;width:38px;height:38px;
                display:inline-flex;align-items:center;justify-content:center;font-size:1.2rem;
                border:2px solid rgba(0,212,255,0.4);margin-left:4px">👤</span>
@@ -935,7 +951,7 @@ if st.session_state["role"] == "teacher":
 # ═══════════════════════════════════════════════════
 # STUDENT DASHBOARD
 # ═══════════════════════════════════════════════════
-elif st.session_state["role"] == "student":
+elif st.session_state.get("user_role") == "student":
     df = load_data()
 
     # ── Dark theme for student (matches teacher) ──
@@ -1032,10 +1048,12 @@ elif st.session_state["role"] == "student":
         st.markdown("""
         <div class="nav-logo">🎓 EduPulse AI<small>Student Portal</small></div>
         """, unsafe_allow_html=True)
-        for p, icon in [("Dashboard","📊"),("My Profile","👤"),("Risk Monitor","⚠️"),
-                        ("Analytics","📈"),("Settings","⚙️")]:
-            st.markdown(f'<div class="nav-item {"active" if p=="Dashboard" else ""}">{icon} {p}</div>',
-                        unsafe_allow_html=True)
+        for p, icon in [("Dashboard","📊"),("Tasks","📝"),("Achievements","🏆"),("Settings","⚙️")]:
+            is_active = st.session_state["student_page"] == p
+            btn_type = "primary" if is_active else "secondary"
+            if st.button(f"{icon}  {p}", key=f"nav_stu_{p}", use_container_width=True, type=btn_type):
+                st.session_state["student_page"] = p
+                st.rerun()
         st.markdown("""
         <div style="padding:28px 16px 10px;text-align:center;margin-top:10px">
           <div style="font-size:3.8rem;line-height:1">🤖</div>
@@ -1045,8 +1063,94 @@ elif st.session_state["role"] == "student":
         if st.button("🔄 Switch Role", use_container_width=True, key="s_back"):
             go_home(); st.rerun()
 
-    sname = st.session_state["student_data"].get("name","Student")
+    sname = st.session_state.get("user_name", "Student")
+    user_id = st.session_state.get("user_id")
+    db = SessionLocal()
 
+    if st.session_state.get("student_page") == "Tasks":
+        st.markdown(f"""
+        <div class="top-bar">
+          <div class="top-bar-logo">🎓 EduPulse AI
+            <span style="color:rgba(255,255,255,0.2);margin:0 10px;font-weight:300">|</span>
+            <span style="font-size:1.1rem;font-weight:700;color:#e2e8f0">Student Dashboard</span>
+          </div>
+          <div class="top-bar-right">
+            <span style="font-size:0.88rem;color:#94a3b8">Welcome, <strong style="color:#a78bfa">{sname}</strong></span>
+          </div>
+        </div>""", unsafe_allow_html=True)
+        
+        st.markdown('<div class="stu-card"><div class="stu-card-title">📝 My Tasks</div>', unsafe_allow_html=True)
+        with st.form("new_task", clear_on_submit=True):
+            t_title = st.text_input("Task Title", placeholder="E.g., Complete Chapter 5 Quiz")
+            t_desc = st.text_input("Description (optional)")
+            if st.form_submit_button("➕ Add Task", use_container_width=True, type="primary"):
+                if t_title:
+                    task_manager.create_task(db, user_id, t_title, t_desc)
+                    badge = gamification.check_and_award_badge(db, user_id, "first_task")
+                    if badge: st.success(f"Task added! 🏆 Earned badge: {badge.badge_name}")
+                    else: st.success("Task added!")
+                    st.rerun()
+        
+        st.markdown("<hr class='div-line'>", unsafe_allow_html=True)
+        tasks = task_manager.get_user_tasks(db, user_id)
+        if not tasks:
+            st.info("No tasks yet! Add one above.")
+        for t in tasks:
+            col1, col2 = st.columns([0.8, 0.2])
+            col1.markdown(f"**{t.title}**<br><small style='color:#64748b'>{t.description}</small>", unsafe_allow_html=True)
+            if t.status == "pending":
+                if col2.button("Done ✅", key=f"task_{t.id}"):
+                    task_manager.mark_task_completed(db, t.id)
+                    st.rerun()
+            else:
+                col2.markdown("<div style='color:#00d4aa;font-weight:800;padding:8px'>Completed 🌟</div>", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+        db.close()
+        st.stop()
+
+    elif st.session_state.get("student_page") == "Achievements":
+        st.markdown(f"""
+        <div class="top-bar">
+          <div class="top-bar-logo">🎓 EduPulse AI
+            <span style="color:rgba(255,255,255,0.2);margin:0 10px;font-weight:300">|</span>
+            <span style="font-size:1.1rem;font-weight:700;color:#e2e8f0">Student Dashboard</span>
+          </div>
+          <div class="top-bar-right">
+            <span style="font-size:0.88rem;color:#94a3b8">Welcome, <strong style="color:#a78bfa">{sname}</strong></span>
+          </div>
+        </div>""", unsafe_allow_html=True)
+
+        st.markdown('<div class="stu-card"><div class="stu-card-title">🔔 Notifications</div>', unsafe_allow_html=True)
+        notifs = gamification.get_unread_notifications(db, user_id)
+        if notifs:
+            for n in notifs:
+                st.info(n.message)
+            if st.button("Mark All as Read", type="secondary"):
+                gamification.mark_notifications_read(db, user_id)
+                st.rerun()
+        else:
+            st.write("No new notifications.")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown('<div class="stu-card"><div class="stu-card-title">🏆 My Badges</div>', unsafe_allow_html=True)
+        badges = gamification.get_user_achievements(db, user_id)
+        if not badges:
+            st.write("Complete tasks and maintain low risk to earn badges!")
+        else:
+            cols = st.columns(4)
+            for i, b in enumerate(badges):
+                with cols[i % 4]:
+                    st.markdown(f"""
+                    <div style="background:rgba(139,92,246,0.1); border:1px solid rgba(139,92,246,0.3); border-radius:12px; padding:20px; text-align:center; margin-bottom:10px;">
+                        <div style="font-size:3rem; margin-bottom:10px;">{b.icon_name}</div>
+                        <div style="font-weight:800; color:#e2e8f0; font-size:0.9rem;">{b.badge_name}</div>
+                        <div style="font-size:0.75rem; color:#94a3b8; margin-top:4px;">{b.description}</div>
+                    </div>""", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+        db.close()
+        st.stop()
+
+    db.close()
     # ── Student Data Entry Form ──
     if not st.session_state["student_submitted"]:
         st.markdown(f"""
